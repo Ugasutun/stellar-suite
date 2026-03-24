@@ -1,20 +1,18 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { FileExplorer } from "@/components/ide/FileExplorer";
-import { EditorTabs, TabInfo } from "@/components/ide/EditorTabs";
-import { CodeEditor } from "@/components/ide/CodeEditor";
+import { EditorTabs } from "@/components/ide/EditorTabs";
+import CodeEditor from "@/components/editor/CodeEditor";
 import { Terminal, LogEntry } from "@/components/ide/Terminal";
 import { Toolbar } from "@/components/ide/Toolbar";
 import { ContractPanel } from "@/components/ide/ContractPanel";
 import { StatusBar } from "@/components/ide/StatusBar";
-import { sampleContracts, FileNode } from "@/lib/sample-contracts";
+import { FileNode } from "@/lib/sample-contracts";
+import { useFileStore } from "@/store/useFileStore";
 import {
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
   FolderTree, Rocket, X, FileText, Terminal as TerminalIcon,
 } from "lucide-react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
-
-const cloneFiles = (files: FileNode[]): FileNode[] =>
-  JSON.parse(JSON.stringify(files));
 
 const findNode = (nodes: FileNode[], pathParts: string[]): FileNode | null => {
   for (const node of nodes) {
@@ -26,18 +24,22 @@ const findNode = (nodes: FileNode[], pathParts: string[]): FileNode | null => {
   return null;
 };
 
-const findParent = (nodes: FileNode[], pathParts: string[]): FileNode[] | null => {
-  if (pathParts.length <= 1) return nodes;
-  const parent = findNode(nodes, pathParts.slice(0, -1));
-  return parent?.children ?? null;
-};
-
 const Index = () => {
-  const [files, setFiles] = useState<FileNode[]>(() => cloneFiles(sampleContracts));
-  const [openTabs, setOpenTabs] = useState<TabInfo[]>([
-    { path: ["hello_world", "lib.rs"], name: "lib.rs" },
-  ]);
-  const [activeTabPath, setActiveTabPath] = useState<string[]>(["hello_world", "lib.rs"]);
+  const {
+    files,
+    openTabs,
+    activeTabPath,
+    unsavedFiles,
+    setActiveTabPath,
+    addTab,
+    closeTab,
+    createFile,
+    createFolder,
+    deleteNode,
+    renameNode,
+    markSaved,
+  } = useFileStore();
+
   const [terminalExpanded, setTerminalExpanded] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [network, setNetwork] = useState("testnet");
@@ -46,27 +48,8 @@ const Index = () => {
   const [showExplorer, setShowExplorer] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-  const [unsavedFiles, setUnsavedFiles] = useState<Set<string>>(new Set());
   const [saveStatus, setSaveStatus] = useState("");
   const [mobilePanel, setMobilePanel] = useState<"none" | "explorer" | "interact">("none");
-
-  // Track saved state
-  const savedContentRef = useRef<Record<string, string>>({});
-
-  // Initialize saved content
-  useEffect(() => {
-    const init = (nodes: FileNode[], path: string[]) => {
-      for (const node of nodes) {
-        const p = [...path, node.name].join("/");
-        if (node.type === "file" && node.content) {
-          savedContentRef.current[p] = node.content;
-        }
-        if (node.children) init(node.children, [...path, node.name]);
-      }
-    };
-    init(files, []);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Desktop defaults — show panels on wide screens
   useEffect(() => {
@@ -96,66 +79,20 @@ const Index = () => {
 
   const handleFileSelect = useCallback((path: string[], file: FileNode) => {
     if (file.type !== "file") return;
-    const key = path.join("/");
-    setActiveTabPath(path);
-    setOpenTabs((prev) => {
-      if (prev.some((t) => t.path.join("/") === key)) return prev;
-      return [...prev, { path, name: file.name }];
-    });
+    addTab(path, file.name);
     // Close mobile explorer after selection
     setMobilePanel("none");
-  }, []);
+  }, [addTab]);
 
   const handleTabClose = useCallback((path: string[]) => {
-    const key = path.join("/");
-    setOpenTabs((prev) => {
-      const next = prev.filter((t) => t.path.join("/") !== key);
-      if (activeTabPath.join("/") === key && next.length > 0) {
-        setActiveTabPath(next[next.length - 1].path);
-      }
-      return next;
-    });
-    // Remove unsaved marker
-    setUnsavedFiles((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
-  }, [activeTabPath]);
-
-  const handleContentChange = useCallback((newContent: string) => {
-    const key = activeTabPath.join("/");
-    setFiles((prev) => {
-      const next = cloneFiles(prev);
-      const file = findNode(next, activeTabPath);
-      if (file) file.content = newContent;
-      return next;
-    });
-    // Mark unsaved
-    setUnsavedFiles((prev) => {
-      if (savedContentRef.current[key] !== newContent) {
-        return new Set(prev).add(key);
-      }
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
-  }, [activeTabPath]);
+    closeTab(path);
+  }, [closeTab]);
 
   const handleSave = useCallback(() => {
-    const key = activeTabPath.join("/");
-    const file = findNode(files, activeTabPath);
-    if (file?.content !== undefined) {
-      savedContentRef.current[key] = file.content;
-    }
-    setUnsavedFiles((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
+    markSaved(activeTabPath);
     setSaveStatus("Saved");
     setTimeout(() => setSaveStatus(""), 2000);
-  }, [activeTabPath, files]);
+  }, [activeTabPath, markSaved]);
 
   // Global Ctrl/Cmd+S
   useEffect(() => {
@@ -168,109 +105,6 @@ const Index = () => {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [handleSave]);
-
-  const handleCreateFile = useCallback((parentPath: string[], name: string) => {
-    const newContent = name.endsWith(".rs")
-      ? `#![no_std]\nuse soroban_sdk::{contract, contractimpl, Env};\n\n// New contract\n`
-      : "";
-    setFiles((prev) => {
-      const next = cloneFiles(prev);
-      const parent = parentPath.length === 0 ? next : findNode(next, parentPath)?.children;
-      if (parent) {
-        parent.push({
-          name,
-          type: "file",
-          language: name.endsWith(".rs") ? "rust" : name.endsWith(".toml") ? "toml" : "text",
-          content: newContent,
-        });
-      }
-      return next;
-    });
-    const newPath = [...parentPath, name];
-    const key = newPath.join("/");
-    savedContentRef.current[key] = newContent;
-    setActiveTabPath(newPath);
-    setOpenTabs((prev) => [...prev, { path: newPath, name }]);
-  }, []);
-
-  const handleCreateFolder = useCallback((parentPath: string[], name: string) => {
-    setFiles((prev) => {
-      const next = cloneFiles(prev);
-      const parent = parentPath.length === 0 ? next : findNode(next, parentPath)?.children;
-      if (parent) {
-        parent.push({ name, type: "folder", children: [] });
-      }
-      return next;
-    });
-  }, []);
-
-  const handleDeleteNode = useCallback((path: string[]) => {
-    setFiles((prev) => {
-      const next = cloneFiles(prev);
-      const parent = findParent(next, path);
-      if (parent) {
-        const idx = parent.findIndex((n) => n.name === path[path.length - 1]);
-        if (idx !== -1) parent.splice(idx, 1);
-      }
-      return next;
-    });
-    const key = path.join("/");
-    setOpenTabs((prev) => {
-      const next = prev.filter((t) => t.path.join("/") !== key);
-      if (activeTabPath.join("/") === key && next.length > 0) {
-        setActiveTabPath(next[next.length - 1].path);
-      }
-      return next;
-    });
-  }, [activeTabPath]);
-
-  const handleRenameNode = useCallback((path: string[], newName: string) => {
-    const oldKey = path.join("/");
-    const newPath = [...path.slice(0, -1), newName];
-    const newKey = newPath.join("/");
-
-    setFiles((prev) => {
-      const next = cloneFiles(prev);
-      const node = findNode(next, path);
-      if (node) node.name = newName;
-      return next;
-    });
-
-    // Update open tabs
-    setOpenTabs((prev) =>
-      prev.map((t) => {
-        const tKey = t.path.join("/");
-        if (tKey === oldKey || tKey.startsWith(oldKey + "/")) {
-          const updated = [...newPath, ...t.path.slice(path.length)];
-          return { ...t, path: updated, name: updated[updated.length - 1] };
-        }
-        return t;
-      })
-    );
-
-    // Update active tab
-    if (activeTabPath.join("/") === oldKey || activeTabPath.join("/").startsWith(oldKey + "/")) {
-      setActiveTabPath([...newPath, ...activeTabPath.slice(path.length)]);
-    }
-
-    // Update saved content refs
-    const entries = Object.entries(savedContentRef.current);
-    for (const [k, v] of entries) {
-      if (k === oldKey || k.startsWith(oldKey + "/")) {
-        const newK = newKey + k.slice(oldKey.length);
-        savedContentRef.current[newK] = v;
-        delete savedContentRef.current[k];
-      }
-    }
-  }, [activeTabPath]);
-
-  const getActiveContent = (): { content: string; language: string } => {
-    const file = findNode(files, activeTabPath);
-    return {
-      content: file?.content || "// Select a file to begin editing",
-      language: file?.language || "rust",
-    };
-  };
 
   const handleCompile = useCallback(() => {
     setIsCompiling(true);
@@ -311,13 +145,14 @@ const Index = () => {
     setTimeout(() => addLog("success", `✓ Result: ["Hello", "Dev"]`), 800);
   }, [addLog]);
 
-  const { content, language } = getActiveContent();
-
   // Tabs with unsaved markers
   const tabsWithStatus = openTabs.map((t) => ({
     ...t,
     unsaved: unsavedFiles.has(t.path.join("/")),
   }));
+
+  const activeFile = findNode(files, activeTabPath);
+  const language = activeFile?.language || "rust";
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -357,12 +192,12 @@ const Index = () => {
               </div>
               <FileExplorer
                 files={files}
-                onFileSelect={(path, file) => { handleFileSelect(path, file); }}
+                onFileSelect={handleFileSelect}
                 activeFilePath={activeTabPath}
-                onCreateFile={handleCreateFile}
-                onCreateFolder={handleCreateFolder}
-                onDeleteNode={handleDeleteNode}
-                onRenameNode={handleRenameNode}
+                onCreateFile={(parent, name) => createFile(parent, name)}
+                onCreateFolder={createFolder}
+                onDeleteNode={deleteNode}
+                onRenameNode={renameNode}
               />
             </div>
             <div className="flex-1 bg-background/60" onClick={() => setMobilePanel("none")} />
@@ -395,10 +230,10 @@ const Index = () => {
                       files={files}
                       onFileSelect={handleFileSelect}
                       activeFilePath={activeTabPath}
-                      onCreateFile={handleCreateFile}
-                      onCreateFolder={handleCreateFolder}
-                      onDeleteNode={handleDeleteNode}
-                      onRenameNode={handleRenameNode}
+                      onCreateFile={(parent, name) => createFile(parent, name)}
+                      onCreateFolder={createFolder}
+                      onDeleteNode={deleteNode}
+                      onRenameNode={renameNode}
                     />
                   </div>
                 </ResizablePanel>
@@ -418,9 +253,6 @@ const Index = () => {
                   />
                   <div className="flex-1 overflow-hidden">
                     <CodeEditor
-                      content={content}
-                      language={language}
-                      onChange={handleContentChange}
                       onCursorChange={(line, col) => setCursorPos({ line, col })}
                       onSave={handleSave}
                     />
