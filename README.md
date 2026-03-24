@@ -1,11 +1,12 @@
 ## Stellar Kit Workspace
 
-This repository is a monorepo containing multiple products.
+This repository is a monorepo containing multiple products
 
 ### Structure
 
-- `/extension`: The VS Code extension source code (Stellar Kit Studio).
-- `/frontend`: The frontend web application.
+- `/extension`: The VS Code extension source code (Stellar Kit Studio)
+- `/frontend`: The frontend web application
+- `/ide`: The Soroban online IDE source code (Stellar Kit Canvas)
 
 ### Development
 
