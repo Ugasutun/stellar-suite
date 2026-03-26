@@ -1,5 +1,11 @@
 export interface IWalletInterface {
   connect(): Promise<string>;
-  signTransaction?(tx: any): Promise<any>; // Optional placeholder for signing
+  signTransaction?(
+    transactionXdr: string,
+    options?: {
+      networkPassphrase?: string;
+      address?: string;
+    }
+  ): Promise<string>;
   checkConnection?(): Promise<string | null>;
 }

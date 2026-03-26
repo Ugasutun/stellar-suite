@@ -22,4 +22,8 @@ export class AlbedoWallet implements IWalletInterface {
     // So we just return null, meaning they need to connect explicitly.
     return null;
   }
+
+  async signTransaction(): Promise<string> {
+    throw new Error("Albedo transaction signing is not supported in the IDE execute flow yet.");
+  }
 }

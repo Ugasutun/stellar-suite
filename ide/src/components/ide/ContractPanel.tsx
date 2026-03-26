@@ -25,11 +25,14 @@ import { toast } from "sonner";
 
 interface ContractPanelProps {
   contractId: string | null;
-  onInvoke: (fn: string, args: string, isSimulation: boolean) => void;
-  lastInvocation?: InvocationDebugData | null;
+  onInvoke: (fn: string, args: string) => void;
+  invokeState?: {
+    phase: "idle" | "preparing" | "signing" | "submitting" | "confirming" | "success" | "failed";
+    message: string;
+  };
 }
 
-export function ContractPanel({ contractId, onInvoke, lastInvocation = null }: ContractPanelProps) {
+export function ContractPanel({ contractId, onInvoke, invokeState }: ContractPanelProps) {
   const [fnName, setFnName] = useState("hello");
   const [args, setArgs] = useState('"Dev"');
   const [showManager, setShowManager] = useState(false);
@@ -306,13 +309,18 @@ export function ContractPanel({ contractId, onInvoke, lastInvocation = null }: C
                 </label>
               </div>
               <button
-                onClick={() => onInvoke(fnName, args, isSimulation)}
-                disabled={!contractId || !activeContext}
+                onClick={() => onInvoke(fnName, args)}
+                disabled={!contractId || !activeContext || (invokeState?.phase && invokeState.phase !== "idle" && invokeState.phase !== "success" && invokeState.phase !== "failed")}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30 transition-colors"
               >
                 <Rocket className="h-3.5 w-3.5" />
-                {isSimulation ? "Run Query" : "Send Tx"}
+                {invokeState?.message ?? "Invoke"}
               </button>
+              {invokeState?.phase === "confirming" && (
+                <p className="text-[9px] text-center text-muted-foreground italic mt-1">
+                  Confirming on-chain every 2s...
+                </p>
+              )}
               {!activeContext && identities.length > 0 && (
                 <p className="text-[9px] text-destructive text-center italic mt-1">Select an identity to invoke</p>
               )}

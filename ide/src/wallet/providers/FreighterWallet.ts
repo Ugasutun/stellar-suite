@@ -1,5 +1,5 @@
 import { IWalletInterface } from "../interfaces/IWalletInterface";
-import { connectFreighterWallet, getFreighterPublicKey, checkFreighterInstalled } from "../../utils/freighter";
+import { connectFreighterWallet, getFreighterPublicKey, checkFreighterInstalled, signFreighterTransaction } from "../../utils/freighter";
 
 export class FreighterWallet implements IWalletInterface {
   async connect(): Promise<string> {
@@ -19,5 +19,15 @@ export class FreighterWallet implements IWalletInterface {
       }
     }
     return null;
+  }
+
+  async signTransaction(
+    transactionXdr: string,
+    options?: {
+      networkPassphrase?: string;
+      address?: string;
+    }
+  ): Promise<string> {
+    return signFreighterTransaction(transactionXdr, options);
   }
 }

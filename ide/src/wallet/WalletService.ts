@@ -28,4 +28,19 @@ export class WalletService {
     }
     return null;
   }
+
+  static async signTransaction(
+    walletType: WalletProviderType,
+    transactionXdr: string,
+    options?: {
+      networkPassphrase?: string;
+      address?: string;
+    }
+  ): Promise<string> {
+    const provider = this.getProvider(walletType);
+    if (!provider.signTransaction) {
+      throw new Error(`Wallet provider "${walletType}" does not support transaction signing.`);
+    }
+    return provider.signTransaction(transactionXdr, options);
+  }
 }

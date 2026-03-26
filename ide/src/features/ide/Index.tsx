@@ -17,6 +17,7 @@ import { useIdentityStore } from "@/store/useIdentityStore";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useDiagnosticsStore } from "@/store/useDiagnosticsStore";
 import { showCompilationFailedToast, showCompilationSuccessToast } from "@/lib/compilationToasts";
+import { executeWriteTransaction, type InvokePhase } from "@/lib/transactionExecution";
 import { DROP_LIMIT_BYTES, mapDroppedEntriesToTree, mergeFileNodes, readDropPayload } from "@/lib/file-drop";
 import { type NetworkKey } from "@/lib/networkConfig";
 import { FileNode } from "@/lib/sample-contracts";
@@ -26,6 +27,7 @@ import { RpcService } from "@/lib/rpcService";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { DeploymentsView } from "@/components/ide/DeploymentsView";
 import { useDeployedContractsStore } from "@/store/useDeployedContractsStore";
+import { useWalletStore } from "@/store/walletStore";
 import { createInvocationDebugData, type InvocationDebugData } from "@/lib/invokeResult";
 import {
   FileText,
@@ -42,6 +44,7 @@ import {
 const COMPILE_API_URL = process.env.NEXT_PUBLIC_COMPILE_API_URL ?? "/api/compile";
 
 type BuildState = "idle" | "building" | "success" | "error";
+type InvokeState = { phase: InvokePhase | "idle"; message: string };
 
 const cloneFiles = (files: FileNode[]): FileNode[] =>
   JSON.parse(JSON.stringify(files));
@@ -93,6 +96,7 @@ const Index = () => {
   const [mobilePanel, setMobilePanel] = useState<"none" | "explorer" | "interact" | "deployments" | "identities">("none");
   const [isExplorerDragActive, setIsExplorerDragActive] = useState(false);
   const [leftSidebarTab, setLeftSidebarTab] = useState<"explorer" | "deployments" | "identities" | "search">("explorer");
+  const [invokeState, setInvokeState] = useState<InvokeState>({ phase: "idle", message: "Invoke" });
   const dragDepthRef = useRef(0);
 
   const {
@@ -150,9 +154,10 @@ const Index = () => {
     appendTerminalOutput,
   } = useWorkspaceStore();
 
-  const { loadIdentities, activeContext, activeIdentity } = useIdentityStore();
+  const { loadIdentities, activeContext, activeIdentity, webWalletPublicKey, setWebWalletPublicKey } = useIdentityStore();
   const { addContract } = useDeployedContractsStore();
-  const { setDiagnostics } = useDiagnosticsStore();
+  const { setDiagnostics, clearDiagnostics } = useDiagnosticsStore();
+  const { publicKey: connectedWalletPublicKey, walletType } = useWalletStore();
 
   const dragDepthRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -160,6 +165,10 @@ const Index = () => {
   useEffect(() => {
     loadIdentities();
   }, [loadIdentities]);
+
+  useEffect(() => {
+    setWebWalletPublicKey(connectedWalletPublicKey);
+  }, [connectedWalletPublicKey, setWebWalletPublicKey]);
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -283,6 +292,68 @@ const Index = () => {
   }, [appendTerminalOutput]);
 
   const handleInvoke = useCallback(
+    async (fn: string, args: string) => {
+      if (!contractId) {
+        appendTerminalOutput("Invoke aborted: no contract selected.\r\n");
+        return;
+      }
+
+      setTerminalExpanded(true);
+      const signer =
+        activeContext?.type === "web-wallet"
+          ? connectedWalletPublicKey ?? "browser-wallet"
+          : activeIdentity?.nickname ?? activeIdentity?.publicKey ?? "anonymous";
+
+      appendTerminalOutput(`Invoking write transaction ${fn}(${args}) as ${signer}...\r\n`);
+      setInvokeState({ phase: "preparing", message: "Preparing..." });
+
+      try {
+        const rpcUrl = network === "local" ? customRpcUrl : horizonUrl;
+        const result = await executeWriteTransaction({
+          contractId,
+          fnName: fn,
+          args,
+          rpcUrl,
+          networkPassphrase,
+          activeContext,
+          activeIdentity,
+          webWalletPublicKey,
+          walletType,
+          onStatus: (status) => {
+            setInvokeState({
+              phase: status.phase,
+              message: status.phase === "confirming" ? "Confirming..." : status.message,
+            });
+            appendTerminalOutput(`${status.message}${status.hash ? ` [${status.hash}]` : ""}\r\n`);
+          },
+        });
+
+        appendTerminalOutput(`Signed XDR submitted to RPC: ${result.hash}\r\n`);
+        appendTerminalOutput(`Transaction reached ${result.finalResponse.status}.\r\n`);
+        setInvokeState({ phase: "success", message: "Confirmed" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Transaction execution failed.";
+        appendTerminalOutput(`Transaction failed: ${message}\r\n`);
+        setInvokeState({ phase: "failed", message: "Failed" });
+      } finally {
+        setTimeout(() => {
+          setInvokeState({ phase: "idle", message: "Invoke" });
+        }, 2000);
+      }
+    },
+    [
+      activeContext,
+      activeIdentity,
+      appendTerminalOutput,
+      connectedWalletPublicKey,
+      contractId,
+      customRpcUrl,
+      horizonUrl,
+      network,
+      networkPassphrase,
+      walletType,
+      webWalletPublicKey,
+    ]
     async (fn: string, args: string, isSimulation: boolean) => {
       setTerminalExpanded(true);
       const signer =
@@ -549,6 +620,7 @@ const Index = () => {
                   <X className="h-4 w-4" />
                 </button>
               </div>
+              <ContractPanel contractId={contractId} onInvoke={handleInvoke} invokeState={invokeState} />
               <AssistantSidebar
                 activeFile={activeFileContext}
                 contractId={contractId}
@@ -642,6 +714,9 @@ const Index = () => {
         {/* Desktop Right Sidebar */}
         <div className="hidden md:flex shrink-0 z-10">
           {showPanel && (
+            <div className="w-64 border-l border-border bg-card">
+              <ContractPanel contractId={contractId} onInvoke={handleInvoke} invokeState={invokeState} />
+            </div>
             <div className="w-[22rem] border-l border-border bg-card">
               <AssistantSidebar
                 activeFile={activeFileContext}

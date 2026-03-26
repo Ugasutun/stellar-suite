@@ -1,4 +1,4 @@
-import { isConnected, requestAccess, getAddress } from "@stellar/freighter-api";
+import { isConnected, requestAccess, getAddress, signTransaction } from "@stellar/freighter-api";
 
 export const checkFreighterInstalled = async (): Promise<boolean> => {
   if (typeof window !== "undefined" && (window as any).freighter) {
@@ -43,5 +43,26 @@ export const connectFreighterWallet = async (): Promise<string> => {
     return access.address;
   } catch (error: any) {
     throw new Error(error.message || "User rejected connection");
+  }
+};
+
+export const signFreighterTransaction = async (
+  transactionXdr: string,
+  options?: {
+    networkPassphrase?: string;
+    address?: string;
+  }
+): Promise<string> => {
+  try {
+    const result = await signTransaction(transactionXdr, options);
+    if (result.error) {
+      throw new Error(result.error.message || "Freighter rejected the transaction.");
+    }
+    if (!result.signedTxXdr) {
+      throw new Error("Freighter did not return a signed transaction.");
+    }
+    return result.signedTxXdr;
+  } catch (error: any) {
+    throw new Error(error.message || "Failed to sign transaction with Freighter.");
   }
 };
