@@ -1,14 +1,19 @@
 import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp, Terminal as TermIcon, Trash2 } from "lucide-react";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 
 interface TerminalProps {
-  output: string;
-  isExpanded: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
   onClear?: () => void;
 }
 
-export function Terminal({ output, isExpanded, onToggle, onClear }: TerminalProps) {
+export function Terminal({ onToggle: propOnToggle, onClear: propOnClear }: TerminalProps) {
+  const {
+    terminalOutput: output,
+    terminalExpanded: isExpanded,
+    setTerminalExpanded,
+    setTerminalOutput,
+  } = useWorkspaceStore();
   const viewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -22,7 +27,7 @@ export function Terminal({ output, isExpanded, onToggle, onClear }: TerminalProp
   return (
     <div className="flex h-full flex-col border-t border-border bg-terminal-bg">
       <button
-        onClick={onToggle}
+        onClick={() => (propOnToggle ? propOnToggle() : setTerminalExpanded(!isExpanded))}
         className="flex items-center justify-between border-b border-border px-2 py-1.5 text-xs font-mono text-muted-foreground transition-colors hover:text-foreground md:px-3"
       >
         <div className="flex items-center gap-2">
@@ -33,14 +38,15 @@ export function Terminal({ output, isExpanded, onToggle, onClear }: TerminalProp
         </div>
 
         <div className="flex items-center gap-1">
-          {isExpanded && onClear && output.length > 0 && (
+          {isExpanded && (propOnClear || output.length > 0) && (
             <span
               role="button"
               title="Clear console"
               className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation();
-                onClear();
+                if (propOnClear) propOnClear();
+                else setTerminalOutput("");
               }}
             >
               <Trash2 className="h-3 w-3" />

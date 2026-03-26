@@ -1,6 +1,7 @@
 import React, { Suspense, useEffect, useRef } from "react";
 import Editor, { type OnChange, type OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 
 interface RevealRangeDetail {
   fileId: string;
@@ -9,8 +10,9 @@ interface RevealRangeDetail {
 }
 
 export interface CodeEditorProps {
-  content: string;
-  language: string;
+  // All props made optional as they are now handled by workspaceStore
+  content?: string;
+  language?: string;
   fileId?: string;
   onChange?: (value: string) => void;
   onCursorChange?: (line: number, col: number) => void;
@@ -18,13 +20,28 @@ export interface CodeEditorProps {
 }
 
 const CodeEditor: React.FC<CodeEditorProps> = ({
-  content,
-  language,
-  fileId,
-  onChange,
-  onCursorChange,
-  onSave,
+  content: propContent,
+  language: propLanguage,
+  fileId: propFileId,
+  onChange: propOnChange,
+  onCursorChange: propOnCursorChange,
+  onSave: propOnSave,
 }: CodeEditorProps) => {
+  const {
+    files,
+    activeTabPath,
+    updateFileContent,
+    markSaved,
+    setCursorPos,
+  } = useWorkspaceStore();
+
+  const activeTabKey = activeTabPath.join("/");
+  const activeFile = files.find(f => f.name === activeTabPath[activeTabPath.length - 1]);
+  
+  const content = propContent ?? activeFile?.content ?? "";
+  const language = propLanguage ?? activeFile?.language ?? "rust";
+  const fileId = propFileId ?? activeTabKey;
+
   const monacoRef = useRef<typeof Monaco | null>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const decorationIdsRef = useRef<string[]>([]);
@@ -64,7 +81,11 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
 
   const handleEditorChange: OnChange = (value) => {
     if (value === undefined) return;
-    onChange?.(value);
+    if (propOnChange) {
+      propOnChange(value);
+    } else {
+      updateFileContent(activeTabPath, value);
+    }
   };
 
   const defineTheme = (monaco: typeof Monaco) => {
@@ -94,11 +115,16 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
     defineTheme(monaco);
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      onSave?.();
+      if (propOnSave) propOnSave();
+      else markSaved(activeTabPath);
     });
 
     editor.onDidChangeCursorPosition((e) => {
-      onCursorChange?.(e.position.lineNumber, e.position.column);
+      if (propOnCursorChange) {
+        propOnCursorChange(e.position.lineNumber, e.position.column);
+      } else {
+        setCursorPos({ line: e.position.lineNumber, col: e.position.column });
+      }
     });
 
     if (pendingRangeRef.current) {
